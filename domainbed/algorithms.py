@@ -476,6 +476,206 @@ class GroupDRO(ERM):
         return {'loss': loss.item()}
 
 
+class SplitGDRO(ERM):
+    """
+    Robust ERM minimizes the error at the worst minibatch
+    Algorithm 1 from [https://arxiv.org/pdf/1911.08731.pdf]
+    """
+    def __init__(self, input_shape, num_classes, num_domains, hparams):
+        super(SplitGDRO, self).__init__(input_shape, num_classes, num_domains,
+                                        hparams)
+        self.register_buffer("q", torch.Tensor())
+        self.f_classifier = networks.Classifier(
+            self.featurizer.n_outputs,
+            num_classes,
+            self.hparams['nonlinear_classifier'])
+        self.optimizer = torch.optim.Adam(
+            list(self.featurizer.parameters()) + list(self.f_classifier.parameters()) + list(self.classifier.parameters()),
+            lr=self.hparams["lr"],
+            weight_decay=self.hparams['weight_decay']
+        )
+
+    def update(self, minibatches, unlabeled=None):
+        device = "cuda" if minibatches[0][0].is_cuda else "cpu"
+
+        if not len(self.q):
+            self.q = torch.ones(len(minibatches)).to(device)
+
+        losses = torch.zeros(len(minibatches)).to(device)
+        dro_losses = torch.zeros(len(minibatches)).to(device)
+
+        for m in range(len(minibatches)):
+            x, y = minibatches[m]
+            features = self.featurizer(x)
+            erm_out = self.f_classifier(features)
+            losses[m] = F.cross_entropy(erm_out, y)
+
+            dro_out = self.classifier(features.detach())
+            dro_losses[m] = F.cross_entropy(dro_out, y)
+            self.q[m] *= (self.hparams["groupdro_eta"] * dro_losses[m].data).exp()
+
+        self.q /= self.q.sum()
+
+        erm_loss = losses.mean()
+        dro_loss = torch.dot(dro_losses, self.q)
+        loss = erm_loss + dro_loss #+ self.hparams["alpha_0"] * torch.cdist(self.f_classifier.weight.view(1, -1), self.classifier.weight.view(1, -1), compute_mode="donot_use_mm_for_euclid_dist").squeeze()
+
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+
+        return {'loss': loss.item(), 'dro_loss': dro_loss.item(), 'erm_loss': erm_loss.item()}
+
+class SplitGDRO_sim(ERM):
+    """
+    Robust ERM minimizes the error at the worst minibatch
+    Algorithm 1 from [https://arxiv.org/pdf/1911.08731.pdf]
+    """
+    def __init__(self, input_shape, num_classes, num_domains, hparams):
+        super(SplitGDRO_sim, self).__init__(input_shape, num_classes, num_domains,
+                                        hparams)
+        self.register_buffer("q", torch.Tensor())
+        self.f_classifier = networks.Classifier(
+            self.featurizer.n_outputs,
+            num_classes,
+            self.hparams['nonlinear_classifier'])
+        self.optimizer = torch.optim.Adam(
+            list(self.featurizer.parameters()) + list(self.f_classifier.parameters()) + list(self.classifier.parameters()),
+            lr=self.hparams["lr"],
+            weight_decay=self.hparams['weight_decay']
+        )
+
+    def update(self, minibatches, unlabeled=None):
+        device = "cuda" if minibatches[0][0].is_cuda else "cpu"
+
+        if not len(self.q):
+            self.q = torch.ones(len(minibatches)).to(device)
+
+        losses = torch.zeros(len(minibatches)).to(device)
+        dro_losses = torch.zeros(len(minibatches)).to(device)
+
+        for m in range(len(minibatches)):
+            x, y = minibatches[m]
+            features = self.featurizer(x)
+            erm_out = self.f_classifier(features)
+            losses[m] = F.cross_entropy(erm_out, y)
+
+            dro_out = self.classifier(features.detach())
+            dro_losses[m] = F.cross_entropy(dro_out, y)
+            self.q[m] *= (self.hparams["groupdro_eta"] * dro_losses[m].data).exp()
+
+        self.q /= self.q.sum()
+
+        erm_loss = losses.mean()
+        dro_loss = torch.dot(dro_losses, self.q)
+        loss = erm_loss + dro_loss + self.hparams["alpha_0"] * torch.cdist(self.f_classifier.weight.view(1, -1), self.classifier.weight.view(1, -1), compute_mode="donot_use_mm_for_euclid_dist").squeeze()
+
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+
+        return {'loss': loss.item(), 'dro_loss': dro_loss.item(), 'erm_loss': erm_loss.item()}
+
+class SplitGDRO_po(ERM):
+    """
+    Robust ERM minimizes the error at the worst minibatch
+    Algorithm 1 from [https://arxiv.org/pdf/1911.08731.pdf]
+    """
+    def __init__(self, input_shape, num_classes, num_domains, hparams):
+        super(SplitGDRO_po, self).__init__(input_shape, num_classes, num_domains,
+                                        hparams)
+        self.register_buffer("q", torch.Tensor())
+        self.f_classifier = networks.Classifier(
+            self.featurizer.n_outputs,
+            num_classes,
+            self.hparams['nonlinear_classifier'])
+        self.optimizer = torch.optim.Adam(
+            list(self.featurizer.parameters()) + list(self.classifier.parameters()),
+            lr=self.hparams["lr"],
+            weight_decay=self.hparams['weight_decay']
+        )
+
+    def update(self, minibatches, unlabeled=None):
+        device = "cuda" if minibatches[0][0].is_cuda else "cpu"
+
+        if not len(self.q):
+            self.q = torch.ones(len(minibatches)).to(device)
+
+        losses = torch.zeros(len(minibatches)).to(device)
+        dro_losses = torch.zeros(len(minibatches)).to(device)
+
+        for m in range(len(minibatches)):
+            x, y = minibatches[m]
+            features = self.featurizer(x)
+            erm_out = self.f_classifier(features)
+            losses[m] = F.cross_entropy(erm_out, y)
+
+            dro_out = self.classifier(features.detach())
+            dro_losses[m] = F.cross_entropy(dro_out, y)
+            self.q[m] *= (self.hparams["groupdro_eta"] * dro_losses[m].data).exp()
+
+        self.q /= self.q.sum()
+
+        erm_loss = losses.mean()
+        dro_loss = torch.dot(dro_losses, self.q)
+        loss = erm_loss + dro_loss #+ self.hparams["alpha_0"] * torch.cdist(self.f_classifier.weight.view(1, -1), self.classifier.weight.view(1, -1), compute_mode="donot_use_mm_for_euclid_dist").squeeze()
+
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+
+        return {'loss': loss.item(), 'dro_loss': dro_loss.item(), 'erm_loss': erm_loss.item()}
+
+class SplitGDRO_sim_po(ERM):
+    """
+    Robust ERM minimizes the error at the worst minibatch
+    Algorithm 1 from [https://arxiv.org/pdf/1911.08731.pdf]
+    """
+    def __init__(self, input_shape, num_classes, num_domains, hparams):
+        super(SplitGDRO_sim_po, self).__init__(input_shape, num_classes, num_domains,
+                                        hparams)
+        self.register_buffer("q", torch.Tensor())
+        self.f_classifier = networks.Classifier(
+            self.featurizer.n_outputs,
+            num_classes,
+            self.hparams['nonlinear_classifier'])
+        self.optimizer = torch.optim.Adam(
+            list(self.featurizer.parameters()) + list(self.classifier.parameters()),
+            lr=self.hparams["lr"],
+            weight_decay=self.hparams['weight_decay']
+        )
+
+    def update(self, minibatches, unlabeled=None):
+        device = "cuda" if minibatches[0][0].is_cuda else "cpu"
+
+        if not len(self.q):
+            self.q = torch.ones(len(minibatches)).to(device)
+
+        losses = torch.zeros(len(minibatches)).to(device)
+        dro_losses = torch.zeros(len(minibatches)).to(device)
+
+        for m in range(len(minibatches)):
+            x, y = minibatches[m]
+            features = self.featurizer(x)
+            erm_out = self.f_classifier(features)
+            losses[m] = F.cross_entropy(erm_out, y)
+
+            dro_out = self.classifier(features.detach())
+            dro_losses[m] = F.cross_entropy(dro_out, y)
+            self.q[m] *= (self.hparams["groupdro_eta"] * dro_losses[m].data).exp()
+
+        self.q /= self.q.sum()
+
+        erm_loss = losses.mean()
+        dro_loss = torch.dot(dro_losses, self.q)
+        loss = erm_loss + dro_loss + self.hparams["alpha_0"] * torch.cdist(self.f_classifier.weight.view(1, -1), self.classifier.weight.view(1, -1), compute_mode="donot_use_mm_for_euclid_dist").squeeze()
+
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+
+        return {'loss': loss.item(), 'dro_loss': dro_loss.item(), 'erm_loss': erm_loss.item()}
+
 class MLDG(ERM):
     """
     Model-Agnostic Meta-Learning
