@@ -476,6 +476,51 @@ class GroupDRO(ERM):
         return {'loss': loss.item()}
 
 
+class Pretrain_GroupDRO(ERM):
+    """
+    Robust ERM minimizes the error at the worst minibatch
+    Algorithm 1 from [https://arxiv.org/pdf/1911.08731.pdf]
+    """
+    def __init__(self, input_shape, num_classes, num_domains, hparams):
+        super(Pretrain_GroupDRO, self).__init__(input_shape, num_classes, num_domains,
+                                        hparams)
+        self.register_buffer("q", torch.Tensor())
+        self.cur_step = -1
+        self.DRO = False
+
+    def update(self, minibatches, unlabeled=None):
+        device = "cuda" if minibatches[0][0].is_cuda else "cpu"
+        self.cur_step += 1
+
+
+        if self.cur_step < self.hparams["pretrain_steps"]:
+            return super(Pretrain_GroupDRO, self).update(minibatches=minibatches, unlabeled=unlabeled)
+
+        if self.DRO is False:
+            print("Start training DRO...")
+            self.DRO = True
+
+        if not len(self.q):
+            self.q = torch.ones(len(minibatches)).to(device)
+
+        losses = torch.zeros(len(minibatches)).to(device)
+
+        for m in range(len(minibatches)):
+            x, y = minibatches[m]
+            losses[m] = F.cross_entropy(self.predict(x), y)
+            self.q[m] *= (self.hparams["groupdro_eta"] * losses[m].data).exp()
+
+        self.q /= self.q.sum()
+
+        loss = torch.dot(losses, self.q)
+
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+
+        return {'loss': loss.item()}
+
+
 class SplitGDRO(ERM):
     """
     Robust ERM minimizes the error at the worst minibatch

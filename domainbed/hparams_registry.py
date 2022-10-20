@@ -69,6 +69,11 @@ def _hparams(algorithm, dataset, random_seed):
     elif algorithm == "GroupDRO":
         _hparam('groupdro_eta', 1e-2, lambda r: 10**r.uniform(-3, -1))
 
+    elif algorithm == "Pretrain_GroupDRO":
+        _hparam('groupdro_eta', 1e-2, lambda r: 10**r.uniform(-3, -1))
+        _hparam('pretrain_steps', 1000, lambda r: 1000 * r.uniform(1, 3))
+
+
     elif algorithm == 'SplitGDRO':
         _hparam('groupdro_eta', 1e-2, lambda r: 10 ** r.uniform(-3, -1))
 
@@ -170,6 +175,10 @@ def _hparams(algorithm, dataset, random_seed):
         _hparam('batch_size', 8, lambda r: 8)
     elif dataset == 'DomainNet':
         _hparam('batch_size', 32, lambda r: int(2**r.uniform(3, 5)))
+    elif dataset == 'VLCS':
+        _hparam('batch_size', 16, lambda r: int(2 ** r.uniform(3, 5.5)))
+    elif dataset == 'WILDSCamelyon':
+        _hparam('batch_size', 16, lambda r: int(2 ** r.uniform(3, 5.5)))
     else:
         _hparam('batch_size', 32, lambda r: int(2**r.uniform(3, 5.5)))
 

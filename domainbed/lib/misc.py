@@ -190,7 +190,8 @@ def accuracy(network, loader, weights, device):
 
     network.eval()
     with torch.no_grad():
-        for x, y in loader:
+        for i, (x, y) in enumerate(loader):
+            # print(i)
             x = x.to(device)
             y = y.to(device)
             p = network.predict(x)

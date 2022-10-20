@@ -20,6 +20,8 @@ from domainbed import hparams_registry
 from domainbed import algorithms
 from domainbed.lib import misc
 from domainbed.lib.fast_data_loader import InfiniteDataLoader, FastDataLoader
+import wandb
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Domain generalization')
@@ -47,8 +49,13 @@ if __name__ == "__main__":
     parser.add_argument('--uda_holdout_fraction', type=float, default=0,
         help="For domain adaptation, % of test to use unlabeled for training.")
     parser.add_argument('--skip_model_save', action='store_true')
+    parser.add_argument('--skip_eval', action='store_true')
     parser.add_argument('--save_model_every_checkpoint', action='store_true')
     args = parser.parse_args()
+
+    wandb.init(project="DomainBed",
+               group=f'{args.dataset}',
+               name=f'{args.algorithm}_T{time.asctime(time.localtime(time.time()))}')
 
     # If we ever want to implement checkpointing, just persist these values
     # every once in a while, and then load them from disk here.
@@ -151,25 +158,32 @@ if __name__ == "__main__":
         for i, (env, env_weights) in enumerate(in_splits)
         if i not in args.test_envs]
 
+    all_env_loaders = [InfiniteDataLoader(
+        dataset=env,
+        weights=env_weights,
+        batch_size=hparams['batch_size'],
+        num_workers=0)  # dataset.N_WORKERS)
+        for i, (env, env_weights) in enumerate(in_splits)]
+
     uda_loaders = [InfiniteDataLoader(
         dataset=env,
         weights=env_weights,
         batch_size=hparams['batch_size'],
-        num_workers=0)#dataset.N_WORKERS)
+        num_workers=dataset.N_WORKERS)
         for i, (env, env_weights) in enumerate(uda_splits)]
 
     eval_loaders = [FastDataLoader(
         dataset=env,
-        batch_size=64,
+        batch_size=hparams['batch_size'],
         num_workers=0)#dataset.N_WORKERS)
-        for env, _ in (in_splits + out_splits + uda_splits)]
-    eval_weights = [None for _, weights in (in_splits + out_splits + uda_splits)]
+        for env, _ in (in_splits+ out_splits)]#) + uda_splits)]
+    eval_weights = [None for _, weights in (in_splits + out_splits)]#  + uda_splits)]
     eval_loader_names = ['env{}_in'.format(i)
         for i in range(len(in_splits))]
     eval_loader_names += ['env{}_out'.format(i)
         for i in range(len(out_splits))]
-    eval_loader_names += ['env{}_uda'.format(i)
-        for i in range(len(uda_splits))]
+    # eval_loader_names += ['env{}_uda'.format(i)
+    #     for i in range(len(uda_splits))]
 
     algorithm_class = algorithms.get_algorithm_class(args.algorithm)
     algorithm = algorithm_class(dataset.input_shape, dataset.num_classes,
@@ -177,6 +191,14 @@ if __name__ == "__main__":
 
     if algorithm_dict is not None:
         algorithm.load_state_dict(algorithm_dict)
+
+    wandb.config = {
+        'learning_rate': hparams['lr'],
+        'eta': hparams.get('groupdro_eta') or 0
+    }
+    wandb.watch(algorithm)
+
+
 
     algorithm.to(device)
 
@@ -203,6 +225,7 @@ if __name__ == "__main__":
         torch.save(save_dict, os.path.join(args.output_dir, filename))
 
 
+    print('Begin training...')
     last_results_keys = None
     for step in range(start_step, n_steps):
         step_start_time = time.time()
@@ -214,12 +237,13 @@ if __name__ == "__main__":
         else:
             uda_device = None
         step_vals = algorithm.update(minibatches_device, uda_device)
+        wandb.log(step_vals)
         checkpoint_vals['step_time'].append(time.time() - step_start_time)
 
         for key, val in step_vals.items():
             checkpoint_vals[key].append(val)
 
-        if (step % checkpoint_freq == 0) or (step == n_steps - 1):
+        if (args.skip_eval is False) and ((step % checkpoint_freq == 0) or (step == n_steps - 1)):
             results = {
                 'step': step,
                 'epoch': step / steps_per_epoch,
@@ -259,6 +283,77 @@ if __name__ == "__main__":
                 save_checkpoint(f'model_step{step}.pkl')
 
     save_checkpoint('model.pkl')
+
+    # with torch.no_grad():
+    #     algorithm.eval()
+    #     hidden_x = []
+    #     for loader in all_env_loaders:
+    #         for x, y in loader:
+    #             x = x.to(device)
+    #             y = y.to(device)
+    #             embeddings = algorithm.featurizer(x)
+    #             hidden_x.append(embeddings)
+    #     hidden_x = torch.cat(hidden_x, dim=0).cpu().to_numpy()
+    #     from tsnecuda import TSNE
+    # from domainbed.visualization import DeepFeatures
+    # DF = DeepFeatures(model=algorithm.featurizer,
+    #                   imgs_folder=f'imgs_folder/{args.algorithm}',
+    #                   embs_folder=f'embs_folder/{args.algorithm}',
+    #                   tensorboard_folder=f'tensorboard_log',
+    #                   experiment_name=f'{args.algorithm}_{args.dataset}')
+    print('Start visualization...')
+    all_x = []
+    # metadata = []
+    all_embeddings = []
+    all_y = []
+    all_env = []
+    test_embeddings = []
+    test_y = []
+    test_env = []
+    for env, loader in enumerate(all_env_loaders):
+        for i, (x, y) in enumerate(loader):
+            x = x.to(device)
+            embeddings = algorithm.featurizer(x).detach()
+            all_embeddings.append(embeddings)
+            all_y.append(y)
+            all_env.append(torch.full((x.shape[0],), fill_value=env))
+            if env in args.test_envs:
+                test_embeddings.append(embeddings)
+                test_y.append(y)
+                test_env.append(torch.full((x.shape[0],), fill_value=env))
+            # metadata += torch.stack([y, torch.full((x.shape[0],), fill_value=env)], dim=1).tolist()
+            # all_x.append(x)
+            if i > 4:
+                break
+    # all_x = torch.cat(all_x, dim=0)
+    all_y = torch.cat(all_y, dim=0).long()
+    all_env = torch.cat(all_env, dim=0).long()
+    all_embeddings = torch.cat(all_embeddings, dim=0)
+    test_y = torch.cat(test_y, dim=0).long()
+    test_env = torch.cat(test_env, dim=0).long()
+    test_embeddings = torch.cat(test_embeddings, dim=0)
+    # all_x = all_x.repeat(1, 2, 1, 1)[:, :3, ...]
+    # all_x[:, 2, ...] = 0
+    # DF.write_embeddings(x=all_x)
+    # DF.create_tensorboard_log(metadata=metadata, metadata_header=['label', 'env'])
+
+    wt = wandb.Table(
+            columns=[str(i) for i in range(all_embeddings.shape[1])],
+            data=all_embeddings.detach().cpu().numpy()
+        )
+    wt.add_column('y', [str(y.item()) for y in all_y])
+    wt.add_column('env', [str(env.item()) for env in all_env])
+    test_wt = wandb.Table(
+        columns=[str(i) for i in range(test_embeddings.shape[1])],
+        data=test_embeddings.detach().cpu().numpy()
+    )
+    test_wt.add_column('y', [str(y.item()) for y in test_y])
+    test_wt.add_column('env', [str(env.item()) for env in test_env])
+    wandb.log({
+        "embeddings": wt,
+        "test_embeddings": test_wt
+    })
+
 
     with open(os.path.join(args.output_dir, 'done'), 'w') as f:
         f.write('done')

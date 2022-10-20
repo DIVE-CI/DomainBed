@@ -96,15 +96,15 @@ def all_test_env_combinations(n):
             yield [i, j]
 
 def make_args_list(n_trials, dataset_names, algorithms, n_hparams_from, n_hparams, steps,
-    data_dir, task, holdout_fraction, single_test_envs, hparams):
+    data_dir, task, holdout_fraction, single_test_envs, hparams, default_hparams=False):
     args_list = []
     for trial_seed in range(n_trials):
         for dataset in dataset_names:
             for algorithm in algorithms:
                 if single_test_envs:
-                    # all_test_envs = [[2]]
-                    all_test_envs = [
-                        [i] for i in range(datasets.num_environments(dataset))]
+                    all_test_envs = [[datasets.num_environments(dataset) - 1]]
+                    # all_test_envs = [
+                    #     [i] for i in range(datasets.num_environments(dataset))]
                 else:
                     all_test_envs = all_test_env_combinations(
                         datasets.num_environments(dataset))
@@ -147,13 +147,14 @@ if __name__ == "__main__":
     parser.add_argument('--output_dir', type=str, required=True)
     parser.add_argument('--data_dir', type=str, required=True)
     parser.add_argument('--seed', type=int, default=0)
-    parser.add_argument('--n_trials', type=int, default=3)
+    parser.add_argument('--n_trials', type=int, default=2)
     parser.add_argument('--command_launcher', type=str, required=True)
     parser.add_argument('--steps', type=int, default=None)
     parser.add_argument('--hparams', type=str, default=None)
     parser.add_argument('--holdout_fraction', type=float, default=0.2)
     parser.add_argument('--single_test_envs', action='store_true')
     parser.add_argument('--skip_confirmation', action='store_true')
+    parser.add_argument('--default_hparams', action='store_true')
     args = parser.parse_args()
 
     args_list = make_args_list(
@@ -167,7 +168,8 @@ if __name__ == "__main__":
         task=args.task,
         holdout_fraction=args.holdout_fraction,
         single_test_envs=args.single_test_envs,
-        hparams=args.hparams
+        hparams=args.hparams,
+        default_hparams=args.default_hparams
     )
 
     jobs = [Job(train_args, args.output_dir) for train_args in args_list]
